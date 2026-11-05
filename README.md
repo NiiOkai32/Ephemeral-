@@ -5,7 +5,7 @@ A native Kotlin / Jetpack Compose Android messenger with Nearby Connections and 
 ## Included
 
 - Material 3 dark interface, conversation view, pairing confirmations and connection errors.
-- Automatic P-256 daily device keys; both devices contribute to ECDH. HKDF-SHA256 derives AES-256-GCM keys, with random nonces and authenticated date/message IDs.
+- Automatic P-256 daily device keys; both devices contribute to ECDH. HKDF-SHA256 derives AES-256-GCM keys with fresh connection challenges, random encryption nonces and authenticated date/message IDs. Connection challenges prevent captured ciphertext being replayed after a reconnect with the same daily keys.
 - Android Keystore wraps the daily private key. Old keys are replaced on UTC rollover while running, or on next use after shutdown. Backup and screenshots are disabled.
 - Nearby pairing requires matching the Google Nearby authentication digits on both phones. Internet invitations authenticate the daily public-key handshake using HMAC-SHA256; share invitations through a trusted channel. Compare the full daily safety number for additional verification.
 - Text, built-in emoji stickers, and AAC voice notes (up to 60 seconds), all through the same encrypted channel. Voice playback is from memory. Temporary recording files are private and deleted after recording; app-start cleanup removes interrupted recordings.

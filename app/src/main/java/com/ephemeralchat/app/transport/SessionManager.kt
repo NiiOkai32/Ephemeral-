@@ -9,9 +9,10 @@ import java.security.MessageDigest
 import javax.crypto.spec.SecretKeySpec
 
 data class ChatMessage(val id:String,val endpointId:String,val senderName:String,val text:String,val timestamp:Long,val isMine:Boolean,val kind:String="text",val day:String=SessionCrypto.today())
-data class SecureSession(val day:String,val key:SecretKeySpec,val fingerprint:String)
+data class SecureSession(val day:String,val key:SecretKeySpec,val fingerprint:String,val peerNonce:String)
 class SessionManager(private val transport:SecureTransport,private val keys:DailyKeys,private val scope:CoroutineScope,private val today:()->String=SessionCrypto::today) {
     private val sessions=mutableMapOf<String,SecureSession>()
+    private val connectionNonces=mutableMapOf<String,String>()
     private val seen=LinkedHashSet<String>()
     private var activeDay=today()
     val history=MutableStateFlow<List<ChatMessage>>(emptyList())
@@ -21,7 +22,7 @@ class SessionManager(private val transport:SecureTransport,private val keys:Dail
         transport.events.onEach { event ->
             when(event) {
                 is MeshEvent.Connected -> hello(event.peer.endpointId)
-                is MeshEvent.Disconnected -> { sessions.remove(event.endpointId);ready.value=ready.value-event.endpointId }
+                is MeshEvent.Disconnected -> { sessions.remove(event.endpointId);connectionNonces.remove(event.endpointId);ready.value=ready.value-event.endpointId }
                 is MeshEvent.RawMessageReceived -> runCatching { receive(event.endpointId,JSONObject(event.payload)) }.onFailure { transport.errors.tryEmit("Rejected invalid or expired encrypted packet") }
             }
         }.launchIn(scope)
@@ -33,18 +34,22 @@ class SessionManager(private val transport:SecureTransport,private val keys:Dail
     }
     private fun hello(id:String) {
         val day=today(); val pub=keys.publicKeyBase64()
-        transport.sendRaw(id,JSONObject().put("type","hello").put("day",day).put("public",pub).put("tag",transport.authenticateHello(id,"$day|$pub")).toString())
+        val nonce=connectionNonces.getOrPut(id) { UUID.randomUUID().toString() }
+        transport.sendRaw(id,JSONObject().put("type","hello").put("day",day).put("public",pub).put("nonce",nonce).put("tag",transport.authenticateHello(id,"$day|$pub|$nonce")).toString())
     }
     private fun receive(id:String,j:JSONObject) {
         val day=j.getString("day");require(day==today())
         if(j.getString("type")=="hello") {
-            val pub=j.getString("public")
-            require(transport.verifyHello(id,"$day|$pub",j.optString("tag")))
+            val pub=j.getString("public");val peerNonce=j.getString("nonce")
+            require(peerNonce.length==36)
+            require(transport.verifyHello(id,"$day|$pub|$peerNonce",j.optString("tag")))
             val local=keys.dailyPair();val peer=keys.decodePeerPublicKey(pub)
             val fingerprint=MessageDigest.getInstance("SHA-256").digest(listOf(keys.publicKeyBase64(),pub).sorted().joinToString("|").toByteArray()).joinToString("") { "%02X".format(it) }.chunked(4).joinToString(" ")
             val previous=sessions[id]
-            if(previous!=null) require(previous.fingerprint==fingerprint) { "Key changed during session" }
-            sessions[id]=SecureSession(day,SessionCrypto.deriveSharedKey(local.private,peer,local.public,day),fingerprint)
+            if(previous!=null) require(previous.fingerprint==fingerprint && previous.peerNonce==peerNonce) { "Key changed during session" }
+            val localNonce=connectionNonces.getOrPut(id) { UUID.randomUUID().toString() }
+            val connectionContext=listOf(localNonce,peerNonce).sorted().joinToString("|")
+            sessions[id]=SecureSession(day,SessionCrypto.deriveSharedKey(local.private,peer,local.public,day,connectionContext),fingerprint,peerNonce)
             ready.value=ready.value+(id to fingerprint)
             if(previous==null) hello(id)
             return

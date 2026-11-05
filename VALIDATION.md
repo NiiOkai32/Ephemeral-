@@ -3,11 +3,12 @@
 ## Completed
 
 - `assembleDebug`: successful. Installable development-signed universal APK generated for Android 8.0+.
-- `testDebugUnitTest`: 6 tests passed; 0 failures and 0 skipped.
+- `testDebugUnitTest`: 7 tests passed; 0 failures and 0 skipped.
   - Bilateral ECDH/HKDF agreement and encrypted message round trip.
   - Distinct nonces and rejection of incorrect device keys, dates, authenticated metadata, truncated data and ciphertext tampering.
   - Two-client protocol exchange: text, sticker, voice payload and signaling round trips; duplicate-message rejection and disconnect state.
   - Invalid handshake and malformed packet rejection without terminating the message collector.
+  - Captured ciphertext rejection after a process restart, with the same daily keys and an empty replay cache.
   - UTC midnight history expiration, fresh device keys and rejection of yesterday's packets.
 - `lintDebug`: passed (one nonblocking obsolete Android version check warning in starter service).
 - `npm test` in `relay/`: 2 integration tests passed. Checks ciphertext forwarding, room separation, two-person limit, disconnect events and invalid frame rejection.

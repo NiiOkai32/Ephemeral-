@@ -51,9 +51,26 @@ class SessionManagerTest {
   val alice=SessionManager(a,Keys(),scope);val bob=SessionManager(b,Keys(),scope)
   b.events.emit(MeshEvent.RawMessageReceived("peer","not-json"))
   a.events.emit(MeshEvent.Connected(PeerDevice("peer","Bob")));runCurrent()
-  val invalid=JSONObject().put("type","hello").put("day",SessionCrypto.today()).put("public",Keys().publicKeyBase64()).put("tag","forged")
+  val invalid=JSONObject().put("type","hello").put("day",SessionCrypto.today()).put("public",Keys().publicKeyBase64()).put("nonce",java.util.UUID.randomUUID().toString()).put("tag","forged")
   b.events.emit(MeshEvent.RawMessageReceived("peer",invalid.toString()));runCurrent()
   alice.sendMessage("peer","still alive");runCurrent();assertEquals("still alive",bob.history.value.single().text)
+ }
+ @Test fun capturedPacketCannotReplayAfterRestartWithSameDailyKeys()=runTest {
+  val ak=Keys();val bk=Keys()
+  val a=Link();val b=Link();a.other=b;b.other=a
+  val firstJob=Job(backgroundScope.coroutineContext[Job])
+  val firstScope=CoroutineScope(firstJob+UnconfinedTestDispatcher(testScheduler))
+  val alice=SessionManager(a,ak,firstScope);SessionManager(b,bk,firstScope)
+  a.events.emit(MeshEvent.Connected(PeerDevice("peer","Bob")));runCurrent()
+  alice.sendMessage("peer","once");runCurrent();val captured=a.sent.last()
+  firstJob.cancel();runCurrent()
+  val c=Link();val d=Link();c.other=d;d.other=c
+  val newScope=CoroutineScope(backgroundScope.coroutineContext+UnconfinedTestDispatcher(testScheduler))
+  val newAlice=SessionManager(c,ak,newScope);val newBob=SessionManager(d,bk,newScope)
+  c.events.emit(MeshEvent.Connected(PeerDevice("peer","Bob")));runCurrent()
+  d.events.emit(MeshEvent.RawMessageReceived("peer",captured));runCurrent()
+  assertTrue(newBob.history.value.isEmpty())
+  newAlice.sendMessage("peer","fresh connection");runCurrent();assertEquals("fresh connection",newBob.history.value.single().text)
  }
  @Test fun midnightExpiresHistoryAndReplacesBothKeys()=runTest {
   val a=Link();val b=Link();a.other=b;b.other=a

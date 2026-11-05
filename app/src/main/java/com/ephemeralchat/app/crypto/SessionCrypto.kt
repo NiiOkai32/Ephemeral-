@@ -14,12 +14,12 @@ import javax.crypto.spec.SecretKeySpec
  * with the peer public key. This protocol requires authenticated pairing. */
 object SessionCrypto {
     fun today(): String = LocalDate.now(ZoneOffset.UTC).toString()
-    fun deriveSharedKey(privateKey: PrivateKey, peer: PublicKey, local: PublicKey, day: String): SecretKeySpec {
+    fun deriveSharedKey(privateKey: PrivateKey, peer: PublicKey, local: PublicKey, day: String, connectionContext: String = ""): SecretKeySpec {
         val agreement = KeyAgreement.getInstance("ECDH")
         agreement.init(privateKey)
         agreement.doPhase(peer, true)
         val publicKeys = listOf(Base64.getEncoder().encodeToString(local.encoded), Base64.getEncoder().encodeToString(peer.encoded)).sorted().joinToString("|")
-        val salt = MessageDigest.getInstance("SHA-256").digest("ephemeral/v1/$day/$publicKeys".toByteArray())
+        val salt = MessageDigest.getInstance("SHA-256").digest("ephemeral/v1/$day/$publicKeys/$connectionContext".toByteArray())
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(salt, "HmacSHA256"))
         val secret = agreement.generateSecret()
