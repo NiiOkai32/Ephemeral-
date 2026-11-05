@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: ephemeral-relay
+    runtime: node
+    rootDir: relay
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
