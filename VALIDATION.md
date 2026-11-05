@@ -11,7 +11,7 @@
   - Captured ciphertext rejection after a process restart, with the same daily keys and an empty replay cache.
   - UTC midnight history expiration, fresh device keys and rejection of yesterday's packets.
 - `lintDebug`: passed (one nonblocking obsolete Android version check warning in starter service).
-- `npm test` in `relay/`: 2 integration tests passed. Checks ciphertext forwarding, room separation, two-person limit, disconnect events and invalid frame rejection.
+- `npm test` in `relay/`: 4 tests passed. Checks ciphertext forwarding, room separation, two-person limit, disconnect events, invalid frame rejection, paired-only automatic ICE configuration and validation of server TURN environment settings.
 - `apksigner verify --verbose`: signature verified. This APK uses a debug signing key; it is not a production release.
 
 ## Still required
@@ -23,3 +23,7 @@
 - Independent cryptographic review, production signing and distribution, and background/push calling before a public production release.
 
 The protocol tests use real cryptographic operations and an in-memory transport; they do not prove radio, hardware, network or WebRTC media behavior. Relay tests run actual local WebSocket connections. No publicly deployed internet service or successful two-phone call is claimed.
+
+## Automatic call setup update (1.1.0 preview)
+
+Manual TURN fields have been removed from the app. The relay supplies its configured ICE servers over WSS after a conversation is paired. Outgoing calls and accepted incoming calls wait for configuration; missing configuration reports an owner setup error. Configuration is held in process memory. There is no embedded TURN password or Metered account API key. A non-secret relay URL can be set at build time to remove the administrator relay field from the user flow. APK build, all seven protocol/cryptography tests, Android lint, APK signature verification and all four relay tests pass for this update. Deploy the updated relay together with the 1.1.0 APK; older relay code does not support automatic ICE requests. Actual Metered credentials and live hosting have not been configured or tested in this environment.

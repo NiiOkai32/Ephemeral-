@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val relayUrl = providers.gradleProperty("EPHEMERAL_RELAY_URL").orElse("").get()
+require(relayUrl.isBlank() || relayUrl.matches(Regex("wss://[A-Za-z0-9.-]+(:[0-9]+)?"))) { "EPHEMERAL_RELAY_URL must be a wss:// host without a path" }
+
 android {
     namespace = "com.ephemeralchat.app"
     compileSdk = 35
@@ -11,8 +14,9 @@ android {
         applicationId = "com.ephemeralchat.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0-preview"
+        versionCode = 2
+        versionName = "1.1.0-preview"
+        buildConfigField("String", "DEFAULT_RELAY_URL", "\"$relayUrl\"")
     }
 
     buildTypes {

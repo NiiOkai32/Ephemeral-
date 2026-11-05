@@ -11,7 +11,7 @@ import java.util.UUID
 data class CallState(val peer:String="",val id:String="",val phase:String="idle",val video:Boolean=false,val muted:Boolean=false,val cameraOff:Boolean=false)
 /** Foreground-only WebRTC calls. Signaling travels through the daily encrypted channel.
  * No camera or microphone is opened until a user starts or accepts a call. */
-class CallController(private val context:Context,private val sessions:SessionManager,private val scope:CoroutineScope) {
+class CallController(private val context:Context,private val sessions:SessionManager,private val scope:CoroutineScope,private val transport:com.ephemeralchat.app.transport.MeshTransport) {
     val state=MutableStateFlow(CallState())
     val error=MutableStateFlow<String?>(null)
     val egl=EglBase.create()
@@ -28,6 +28,7 @@ class CallController(private val context:Context,private val sessions:SessionMan
     private var remoteReady=false
     private val candidates=mutableListOf<IceCandidate>()
     private var timeout:Job?=null
+    private var preparation:Job?=null
     private val audioManager=context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
     init {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
@@ -36,9 +37,26 @@ class CallController(private val context:Context,private val sessions:SessionMan
     }
     fun start(peer:String,video:Boolean) {
         if(state.value.phase!="idle") return
-        state.value=CallState(peer,UUID.randomUUID().toString(),"calling",video)
-        runCatching { createPeer();pc!!.createOffer(sdpObserver { sdp -> pc!!.setLocalDescription(sdpObserver(),sdp);send("offer",JSONObject().put("sdp",sdp.description).put("video",video)) },MediaConstraints()) }.onFailure { fail("Microphone or camera unavailable") }
-        armTimeout()
+        val callId=UUID.randomUUID().toString()
+        state.value=CallState(peer,callId,"preparing",video)
+        preparation=scope.launch {
+            runCatching {
+                val servers=resolveServers(peer)
+                if(state.value.id!=callId) return@launch
+                createPeer(servers);state.value=state.value.copy(phase="calling")
+                pc!!.createOffer(sdpObserver { sdp -> pc!!.setLocalDescription(sdpObserver(),sdp);send("offer",JSONObject().put("sdp",sdp.description).put("video",video)) },MediaConstraints())
+                armTimeout()
+            }.onFailure { if(it !is CancellationException)fail(it.message?:"Unable to prepare call") }
+        }
+    }
+    private suspend fun resolveServers(peer:String):List<PeerConnection.IceServer> {
+        val result=mutableListOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
+        val config=if(peer=="internet") withTimeoutOrNull(10000) { transport.callConfig.filterNotNull().first() }
+            ?:error("Calling configuration unavailable. Please try again later.") else transport.callConfig.value
+        if(peer=="internet" && (config?.error!=null || config?.servers.isNullOrEmpty()))
+            error(config?.error?:"Calling has not been configured by the app owner yet.")
+        config?.servers?.forEach { server -> result+=PeerConnection.IceServer.builder(server.urls).setUsername(server.username).setPassword(server.credential).createIceServer() }
+        return result
     }
     private fun armTimeout() { timeout?.cancel();timeout=scope.launch { delay(45000);if(state.value.phase!="connected") { error.value="Call timed out"; hangup() } } }
     private fun send(type:String,j:JSONObject=JSONObject()) { sessions.sendSignal(state.value.peer,j.put("type",type).put("call",state.value.id)) }
@@ -66,25 +84,28 @@ class CallController(private val context:Context,private val sessions:SessionMan
     }
     fun accept() {
         if(state.value.phase!="incoming") return
-        runCatching {
-            createPeer();state.value=state.value.copy(phase="connecting")
-            pc!!.setRemoteDescription(object:SdpObserver {
-                override fun onSetSuccess() { scope.launch { remoteReady=true;flushCandidates();pc!!.createAnswer(sdpObserver { sdp -> pc!!.setLocalDescription(sdpObserver(),sdp);send("answer",JSONObject().put("sdp",sdp.description)) },MediaConstraints()) } }
-                override fun onSetFailure(e:String?) { scope.launch { fail("Unable to accept call") } }
-                override fun onCreateSuccess(s:SessionDescription?) {}
-                override fun onCreateFailure(e:String?) {}
-            },SessionDescription(SessionDescription.Type.OFFER,pendingOffer!!))
-        }.onFailure { fail("Allow microphone and camera permissions to accept") }
+        val current=state.value
+        val offer=pendingOffer?:return
+        state.value=current.copy(phase="preparing")
+        preparation=scope.launch {
+            runCatching {
+                val servers=resolveServers(current.peer)
+                if(state.value.id!=current.id)return@launch
+                createPeer(servers);state.value=state.value.copy(phase="connecting")
+                pc!!.setRemoteDescription(object:SdpObserver {
+                    override fun onSetSuccess() { scope.launch { remoteReady=true;flushCandidates();pc!!.createAnswer(sdpObserver { sdp -> pc!!.setLocalDescription(sdpObserver(),sdp);send("answer",JSONObject().put("sdp",sdp.description)) },MediaConstraints()) } }
+                    override fun onSetFailure(e:String?) { scope.launch { fail("Unable to accept call") } }
+                    override fun onCreateSuccess(s:SessionDescription?) {}
+                    override fun onCreateFailure(e:String?) {}
+                },SessionDescription(SessionDescription.Type.OFFER,offer))
+            }.onFailure { if(it !is CancellationException) fail(it.message?:"Unable to prepare call") }
+        }
     }
     private fun flushCandidates() { candidates.forEach { pc?.addIceCandidate(it) };candidates.clear() }
-    private fun createPeer() {
+    private fun createPeer(servers:List<PeerConnection.IceServer>) {
         audioManager.mode=android.media.AudioManager.MODE_IN_COMMUNICATION
         @Suppress("DEPRECATION")
         audioManager.isSpeakerphoneOn=state.value.video
-        val prefs=context.getSharedPreferences("settings",Context.MODE_PRIVATE)
-        val servers=mutableListOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-        val turn=prefs.getString("turn","").orEmpty()
-        if(turn.startsWith("turn:")||turn.startsWith("turns:")) servers+=PeerConnection.IceServer.builder(turn).setUsername(prefs.getString("turnUser","")).setPassword(com.ephemeralchat.app.ui.CallCredentials.password).createIceServer()
         val config=PeerConnection.RTCConfiguration(servers).apply { sdpSemantics=PeerConnection.SdpSemantics.UNIFIED_PLAN }
         pc=factory.createPeerConnection(config,object:PeerConnection.Observer {
             override fun onIceCandidate(c:IceCandidate) { scope.launch { runCatching { send("ice",JSONObject().put("mid",c.sdpMid).put("line",c.sdpMLineIndex).put("candidate",c.sdp)) } } }
@@ -132,6 +153,7 @@ class CallController(private val context:Context,private val sessions:SessionMan
     fun hangup() { runCatching { if(state.value.phase!="idle") send("end") };close() }
     private fun fail(message:String) { error.value=message;hangup() }
     private fun close() {
+        preparation?.cancel();preparation=null
         timeout?.cancel();pc?.close();pc?.dispose();pc=null
         runCatching { capturer?.stopCapture() };capturer?.dispose();capturer=null
         localVideo?.dispose();localVideo=null;remoteVideo.value=null

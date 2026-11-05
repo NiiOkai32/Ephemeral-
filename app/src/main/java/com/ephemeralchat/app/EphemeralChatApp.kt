@@ -29,6 +29,6 @@ class EphemeralChatApp : Application() {
         val deviceLabel = "${Build.MODEL}-${(1000..9999).random()}"
         meshTransport = MeshTransport(this, keyManager, deviceLabel)
         sessionManager = SessionManager(meshTransport, keyManager, appScope)
-        calls = com.ephemeralchat.app.call.CallController(this, sessionManager, appScope)
+        calls = com.ephemeralchat.app.call.CallController(this, sessionManager, appScope, meshTransport)
     }
 }

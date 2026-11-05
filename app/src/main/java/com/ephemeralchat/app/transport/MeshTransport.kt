@@ -15,6 +15,8 @@ import javax.crypto.spec.SecretKeySpec
 import java.util.Base64
 
 data class PeerDevice(val endpointId: String, val displayName: String)
+data class CallServer(val urls:List<String>,val username:String,val credential:String)
+data class CallConfig(val servers:List<CallServer> = emptyList(),val error:String? = null)
 data class PairingRequest(val endpointId: String,val name: String,val code: String)
 sealed class MeshEvent {
     data class Connected(val peer: PeerDevice): MeshEvent()
@@ -25,6 +27,7 @@ class MeshTransport(context: Context, private val keyManager: KeyManager, privat
     private val client=Nearby.getConnectionsClient(context)
     override val events=MutableSharedFlow<MeshEvent>(extraBufferCapacity=256)
     override val errors=MutableSharedFlow<String>(extraBufferCapacity=16)
+    val callConfig=MutableStateFlow<CallConfig?>(null)
     val status=MutableStateFlow("Nearby discovery is off")
     val discoveredPeers=MutableStateFlow<Map<String,PeerDevice>>(emptyMap())
     val connectedPeers=MutableStateFlow<Map<String,PeerDevice>>(emptyMap())
@@ -93,7 +96,26 @@ class MeshTransport(context: Context, private val keyManager: KeyManager, privat
                 runCatching {
                     val j=JSONObject(text)
                     when(j.getString("type")) {
-                        "peer" -> connected("internet","Internet contact")
+                        "peer" -> {
+                            ws.send(JSONObject().put("type","ice").toString())
+                            connected("internet","Internet contact")
+                        }
+                        "ice" -> {
+                            if(j.has("error")) callConfig.value=CallConfig(error="Calling has not been configured by the app owner yet.")
+                            else {
+                                val list=j.getJSONArray("iceServers");require(list.length() in 1..8)
+                                val servers=(0 until list.length()).map { n ->
+                                    val item=list.getJSONObject(n);val urls=item.getJSONArray("urls")
+                                    require(urls.length() in 1..8)
+                                    val values=(0 until urls.length()).map { urls.getString(it) }
+                                    require(values.all { it.length<=512 && (it.startsWith("turn:")||it.startsWith("turns:")) })
+                                    val user=item.getString("username");val credential=item.getString("credential")
+                                    require(user.length in 1..1024 && credential.length in 1..1024)
+                                    CallServer(values,user,credential)
+                                }
+                                callConfig.value=CallConfig(servers)
+                            }
+                        }
                         "left" -> disconnected("internet")
                         "data" -> receive("internet",j.getString("data"))
                     }
@@ -103,7 +125,7 @@ class MeshTransport(context: Context, private val keyManager: KeyManager, privat
             override fun onClosed(ws:WebSocket,c:Int,r:String) { main.post { if(ws===socket) { disconnected("internet"); status.value="Relay disconnected" } } }
         })
     }
-    fun disconnectInternet() { socket?.close(1000,"Leaving"); socket=null; disconnected("internet"); invite=null }
+    fun disconnectInternet() { callConfig.value=null; socket?.close(1000,"Leaving"); socket=null; disconnected("internet"); invite=null }
     override fun authenticateHello(id:String,payload:String):String {
         if(id!="internet") return ""
         val mac=Mac.getInstance("HmacSHA256")

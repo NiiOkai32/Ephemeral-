@@ -20,7 +20,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -189,31 +188,21 @@ fun EphemeralApp(app:EphemeralChatApp,activity:MainActivity) {
 
 @Composable private fun InternetSettings(context:Context,transport:com.ephemeralchat.app.transport.MeshTransport,onClose:()->Unit) {
     val prefs=remember {context.getSharedPreferences("settings",Context.MODE_PRIVATE)}
-    var relay by remember {mutableStateOf(prefs.getString("relay","").orEmpty())}
+    var relay by remember {mutableStateOf(com.ephemeralchat.app.BuildConfig.DEFAULT_RELAY_URL.ifBlank { prefs.getString("relay","").orEmpty() })}
     var invite by remember {mutableStateOf("")}
-    var turn by remember {mutableStateOf(prefs.getString("turn","").orEmpty())}
-    var user by remember {mutableStateOf(prefs.getString("turnUser","").orEmpty())}
-    var password by remember {mutableStateOf("")}
     var error by remember {mutableStateOf<String?>(null)}
     AlertDialog(onDismissRequest=onClose,title={Text("Connect over the internet")},text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
         Text("Both people need the same relay URL and invitation. Share the invitation privately; the relay only sees its hash.")
-        OutlinedTextField(relay,{relay=it},label={Text("Relay URL · wss://your-server")},singleLine=true)
+        if(com.ephemeralchat.app.BuildConfig.DEFAULT_RELAY_URL.isBlank()) OutlinedTextField(relay,{relay=it},label={Text("Relay URL · wss://your-server")},singleLine=true)
         OutlinedTextField(invite,{invite=it.trim()},label={Text("Invitation code")},singleLine=true)
         Row { TextButton(onClick={invite=Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also{SecureRandom().nextBytes(it)})}){Text("Generate")};TextButton(enabled=invite.isNotBlank(),onClick={(context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Invitation",invite))}){Text("Copy")}}
-        Text("TURN is recommended for reliable calls across networks. Use short-lived credentials from your provider.",style=MaterialTheme.typography.bodySmall)
-        OutlinedTextField(turn,{turn=it},label={Text("TURN URL (optional)")},singleLine=true)
-        OutlinedTextField(user,{user=it},label={Text("TURN username")},singleLine=true)
-        OutlinedTextField(password,{password=it},label={Text("TURN password")},singleLine=true,visualTransformation=PasswordVisualTransformation())
+        Text("Calls configure themselves automatically when you connect. No calling username or password is needed.",style=MaterialTheme.typography.bodySmall)
         error?.let {Text(it,color=MaterialTheme.colorScheme.error)}
     }},confirmButton={TextButton(onClick={runCatching{
-        require(turn.isBlank()||turn.startsWith("turn:")||turn.startsWith("turns:")){"Invalid TURN URL"}
-        prefs.edit().putString("relay",relay).putString("turn",turn).putString("turnUser",user).apply()
-        // TURN password remains process-memory only; never persisted to preferences.
-        CallCredentials.password=password
+        prefs.edit().putString("relay",relay).apply()
         transport.connectInternet(relay,invite);onClose()
     }.onFailure{error=it.message}}){Text("Connect")}},dismissButton={TextButton(onClick=onClose){Text("Cancel")}})
 }
-object CallCredentials {var password=""}
 private class VoiceRecorder(private val context:Context) {
     private var recorder:MediaRecorder?=null
     private var file:File?=null
