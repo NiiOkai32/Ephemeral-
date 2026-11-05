@@ -2,7 +2,7 @@
 
 ## Completed
 
-- `assembleDebug`: successful. Installable development-signed universal APK generated for Android 8.0+.
+- `assembleDebug`: successful. Development-signed universal APK generated for Android 8.0+.
 - `testDebugUnitTest`: 7 tests passed; 0 failures and 0 skipped.
   - Bilateral ECDH/HKDF agreement and encrypted message round trip.
   - Distinct nonces and rejection of incorrect device keys, dates, authenticated metadata, truncated data and ciphertext tampering.
@@ -16,7 +16,7 @@
 
 ## Still required
 
-- Complete Android launch/UI smoke testing (software emulator attempt in progress at time of this document).
+- Android launch/UI smoke testing remains unverified. API 35 SDK image lacked a boot kernel; the API 34 software emulator had no KVM acceleration and remained in system first-boot optimization. Installation attempts failed inside Android StorageManager before the app could be installed (PackageManagerInternal not initialized). No app startup success is claimed. Retry on a fully booted emulator or physical phone.
 - Two physical Google Play Services Android phones: Nearby discovery, matching/rejecting pairing digits, fragmented voice transfer, permissions and reconnection.
 - Real microphone playback and camera/audio behavior, incoming call accept/decline, mute, camera toggle, hangup and foreground-only lifecycle.
 - A hosted secure WebSocket relay, plus TURN configuration and calls across independent mobile networks / restrictive NAT.
